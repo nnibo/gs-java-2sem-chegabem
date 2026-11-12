@@ -6,6 +6,22 @@ Entrega da disciplina **Domain Driven Design (Java)** — FIAP, Global Solution.
 
 ---
 
+## API em produção
+
+A API está no ar no Render, com Swagger UI aberto:
+
+### https://gs-java-2sem-chegabem.onrender.com/swagger-ui.html
+
+> **O primeiro acesso pode levar até 2 minutos.** O plano gratuito do Render hiberna o
+> serviço após alguns minutos sem uso, e a primeira requisição precisa subir o container e
+> inicializar a aplicação. Basta aguardar o carregamento — não é erro. Os acessos seguintes
+> respondem normalmente.
+
+Para autenticar, veja [Como autenticar](#como-autenticar): o fluxo é o mesmo em produção e
+em ambiente local, só muda a URL base.
+
+---
+
 ## Stack
 
 | | |
@@ -378,10 +394,49 @@ O handler de 500 **não** devolve a mensagem original, para não expor stack tra
 
 ## Deploy no Render
 
-O `Dockerfile` é multi-estágio: compila com Maven e publica só o JRE com o jar, rodando como usuário sem privilégios.
+Está no ar em **https://gs-java-2sem-chegabem.onrender.com** como Web Service Docker, no
+plano gratuito. O Render não tem runtime nativo de Java, então o build vem do `Dockerfile`:
+multi-estágio, compila com Maven e publica só o JRE com o jar, rodando como usuário sem
+privilégios.
 
-1. No Render: **New → Web Service**, aponte para o repositório e escolha **Docker** como runtime (a raiz do serviço precisa ser a pasta `chegabem/`).
-2. Em **Environment**, cadastre as mesmas seis variáveis da seção "Como executar localmente": `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `JWT_KEY`, `ADMIN_EMAIL` e `ADMIN_PASSWORD`.
-3. A porta não precisa de configuração: o Render injeta `PORT` e o `application.properties` já lê `${PORT:8080}`.
+### Como o serviço foi configurado
 
-> **Atenção:** o free tier do Render hiberna por inatividade. A primeira chamada após a hibernação leva alguns segundos — vale aquecer a URL antes de uma demonstração.
+| Campo | Valor |
+|---|---|
+| Language | `Docker` |
+| Branch | `main` |
+| Root Directory | `chegabem` |
+| Instance Type | `Free` |
+| Health Check Path | `/v3/api-docs` |
+
+O **Root Directory** é o campo que não pode faltar: o projeto Maven vive em `chegabem/`, e
+sem ele o Render procura o `Dockerfile` na raiz do repositório e o build falha.
+
+### Variáveis de ambiente
+
+As mesmas seis da seção "Como executar localmente" — `DATABASE_URL`,
+`DATABASE_USERNAME`, `DATABASE_PASSWORD`, `JWT_KEY`, `ADMIN_EMAIL` e `ADMIN_PASSWORD` —
+mais `SPRING_JPA_SHOW_SQL=false`, que sobrescreve o `show-sql=true` do
+`application.properties` (variável de ambiente tem precedência sobre o arquivo no Spring
+Boot). Em produção o log de SQL do Hibernate consome a cota de log do plano free muito
+rápido.
+
+A porta não precisa de configuração: o Render injeta `PORT` e o `application.properties` já
+lê `${PORT:8080}`.
+
+### O que muda em relação ao ambiente local
+
+- **Fuso horário** — o container roda em UTC, então o `Dockerfile` fixa
+  `TZ=America/Sao_Paulo`. Sem isso o `abertoAgora` dos pontos seguros e os horários de
+  trajeto ficariam 3 horas deslocados.
+- **Memória** — o plano free dá 512 MB, e o `-XX:MaxRAMPercentage` está em 65% para o heap
+  caber junto com metaspace e threads sem o container ser derrubado por OOM.
+- **Hibernação** — o serviço dorme após alguns minutos sem requisição, e a primeira chamada
+  seguinte leva até 2 minutos. Enquanto dorme, a verificação agendada de não chegada
+  (`@Scheduled`, a cada 60 s) **não roda** — ela retoma no próximo acesso. Para demonstrar
+  o alerta de não chegada disparando sozinho, aqueça a URL antes.
+- **Banco** — continua o Oracle da FIAP, acessado pela internet; nada de dados é hospedado
+  no Render.
+
+A carga inicial é idempotente: se o schema já tiver bairros, trechos, tipos de relato e a
+conta ADMIN, a subida no Render não duplica nada.
